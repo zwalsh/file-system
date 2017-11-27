@@ -1,8 +1,17 @@
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "storage.h"
+#include "pages.h"
+
+const int DATA_BITMAP_PAGE = 0;
+const int INODE_BITMAP_PAGE = 1;
+const int INODE_PAGE = 2;
+const int DATA_BLOCK_PAGE = 20;
 
 typedef struct file_data {
     const char* path;
@@ -19,7 +28,7 @@ static file_data file_table[] = {
 void
 storage_init(const char* path)
 {
-    printf("TODO: Store file system data in: %s\n", path);
+	pages_init(path);
 }
 
 static int

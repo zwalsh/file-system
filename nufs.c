@@ -4,8 +4,8 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include <bsd/string.h>
+#include <dirent.h>
 #include <assert.h>
 
 #define FUSE_USE_VERSION 26
