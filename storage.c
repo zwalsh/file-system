@@ -44,7 +44,8 @@ typedef struct iNode {
 void* 
 get_iNode(int index)
 {
-	return pages_get_page(INODE_PAGE + index);
+	iNode* inode_start = pages_get_page(INODE_PAGE);
+	return inode_start + index;
 }
 
 void*
