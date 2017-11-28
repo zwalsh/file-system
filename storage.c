@@ -5,11 +5,12 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
-#include <errno.h>
+#include <stdbool.h>
 
 #include "storage.h"
 #include "pages.h"
 #include "slist.h"
+#include "util.h"
 
 const int DATA_BITMAP_PAGE = 0;
 const int INODE_BITMAP_PAGE = 1;
@@ -57,9 +58,45 @@ get_data_block(int index)
 }
 
 void
+root_init()
+{
+	iNode* root = get_iNode(0);
+	if(root->mode != 0) {
+		return;
+	}
+
+	root->mode = S_IFDIR | S_IRWXU;
+	root->num_hard_links = 1;
+	root->user_id = getuid();
+	root->group_id = getgid();
+	//could also be page size
+	root->size = sizeof(directory);
+
+	time_t current_time = time(NULL);
+	root->last_time_accessed = current_time;
+	root->last_time_modified = current_time;
+	root->last_time_status_change = current_time;
+
+	void* data_bitmap = pages_get_page(DATA_BITMAP_PAGE);
+	void* inode_bitmap = pages_get_page(INODE_BITMAP_PAGE);
+
+	memset(data_bitmap, 0, 4096);
+	memset(inode_bitmap, 0, 4096);
+
+	root->data_block_ids[0] = 0;
+	for(int ii = 1; ii < 10; ii++) {
+		root->data_block_ids[ii] = -1;
+	}
+
+	bitmap_set((char*) data_bitmap, 0, true);
+	bitmap_set((char*) inode_bitmap, 0, true);
+}
+
+void
 storage_init(const char* path)
 {
 	pages_init(path);
+	root_init();
 }
 
 typedef struct file_data {
@@ -73,12 +110,6 @@ static file_data file_table[] = {
     {"/hello.txt", 0100644, "hello\n"},
     {0, 0, 0},
 };
-
-static int
-streq(const char* aa, const char* bb)
-{
-    return strcmp(aa, bb) == 0;
-}
 
 int
 inode_child(int inode_index, char* inode_name)
@@ -101,10 +132,10 @@ get_inode_from_path(const char* path)
 	slist* path_components = s_split(path, '/');
 	int inode_index = 0;
 	slist* current = path_components;
-	while (current != NULL) {
+	while (current != NULL && strcmp(current->data, "") != 0) {
 		inode_index = inode_child(inode_index, current->data);
 		if (inode_index == -1) {
-			return -ENOENT;
+			return -1;
 		}
 		current = current->next;
 	}
@@ -135,10 +166,11 @@ get_stat(const char* path, struct stat* st)
 	int inode_index = get_inode_from_path(path);
 	
 	if (inode_index < 0) {
-		return inode_index;
+		return -1;
 	}
 
 	iNode* node = get_iNode(inode_index);
+	printf("inode index: %i\n", inode_index);
 
 	memset(st, 0, sizeof(struct stat));
 	st->st_dev = makedev(0, 0);
@@ -154,6 +186,8 @@ get_stat(const char* path, struct stat* st)
 	st->st_atime = node->last_time_accessed;
 	st->st_mtime = node->last_time_modified;
 	st->st_ctime = node->last_time_status_change;
+
+	printf("inode mode: %lu\n", st->st_ino);
 	
 	return 0;
 }

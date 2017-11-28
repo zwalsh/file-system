@@ -34,6 +34,7 @@ nufs_getattr(const char *path, struct stat *st)
         return -ENOENT;
     }
     else {
+		printf("Success\n");
         return 0;
     }
 }
