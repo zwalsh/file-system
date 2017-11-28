@@ -47,11 +47,11 @@ pages_get_page(int pnum)
     return pages_base + 4096 * pnum;
 }
 
-pnode*
+inode*
 pages_get_node(int node_id)
 {
-    pnode* idx = (pnode*) pages_get_page(0);
-    return &(idx[pnum]);
+    inode* idx = (inode*) pages_get_page(0);
+    return &(idx[node_id]);
 }
 
 int
@@ -68,7 +68,7 @@ pages_find_empty()
 }
 
 void
-print_node(pnode* node)
+print_node(inode* node)
 {
     if (node) {
         printf("node{refs: %d, mode: %04o, size: %d, xtra: %d}\n",
