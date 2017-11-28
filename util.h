@@ -48,4 +48,15 @@ bitmap_read(char* bitmap, int index)
 	return (int) ((*byte & (char)(1 << pos)) >> pos);
 }
 
+static int
+bitmap_first_free(char* bitmap, int size)
+{
+	for (int ii = 0; ii < size; ++ii) {
+		if (bitmap_read(bitmap, ii) == 0) {
+			return ii;
+		}
+	}
+	return -1;
+}
+
 #endif
