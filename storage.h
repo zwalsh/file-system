@@ -5,8 +5,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include "slist.h"
+
 void storage_init(const char* path);
 int         get_stat(const char* path, struct stat* st);
 const char* get_data(const char* path);
+slist* get_filenames_from_dir(const char* path);
 
 #endif

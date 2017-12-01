@@ -12,7 +12,9 @@
 #include <fuse.h>
 
 #include "storage.h"
+#include "slist.h"
 
+const static int MAX_FILENAME = 200;
 
 // implementation for: man 2 access
 // Checks if a file exists.
@@ -34,7 +36,6 @@ nufs_getattr(const char *path, struct stat *st)
         return -ENOENT;
     }
     else {
-		printf("Success\n");
         return 0;
     }
 }
@@ -48,15 +49,25 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     struct stat st;
 
     printf("readdir(%s)\n", path);
+	slist* filenames = get_filenames_from_dir(path);
+	slist* curr_filename = filenames;
+	while(curr_filename != NULL) {
+		char filepath[MAX_FILENAME];
+		strcpy(filepath, path);
+		strcat(filepath, curr_filename->data);
 
-    get_stat("/", &st);
-    // filler is a callback that adds one item to the result
-    // it will return non-zero when the buffer is full
-    filler(buf, ".", &st, 0);
+		get_stat(filepath, &st);
+		//should curr_filename->data be null terminated?
+		// wtf do we pass in as an offset
+		int rv = filler(buf, curr_filename->data, &st, 0);
+		if(rv != 0) {
+			break;
+		}
+		
+		curr_filename = curr_filename->next;
+	}
 
-    get_stat("/hello.txt", &st);
-    filler(buf, "hello.txt", &st, 0);
-
+	s_free(filenames);
     return 0;
 }
 
@@ -154,7 +165,7 @@ int
 nufs_utimens(const char* path, const struct timespec ts[2])
 {
     //int rv = storage_set_time(path, ts);
-    int rv = -1;
+    int rv = 1;
     printf("utimens(%s, [%ld, %ld; %ld %ld]) -> %d\n",
            path, ts[0].tv_sec, ts[0].tv_nsec, ts[1].tv_sec, ts[1].tv_nsec, rv);
 	return rv;

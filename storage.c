@@ -6,6 +6,9 @@
 #include <time.h>
 #include <math.h>
 #include <stdbool.h>
+#include <assert.h>
+#include <errno.h>
+#include <stdlib.h>
 
 #include "storage.h"
 #include "pages.h"
@@ -24,7 +27,7 @@ typedef struct file_entry {
 
 typedef struct directory {
 	int number_of_entries;
-	file_entry* entries;
+	file_entry entries;
 } directory;
 
 // contains metadata for each file or directory
@@ -55,6 +58,19 @@ void*
 get_data_block(int index)
 {
 	return pages_get_page(DATA_BLOCK_PAGE + index);
+}
+
+bool
+is_iNode_directory(iNode* node)
+{
+	return (node->mode & S_IFMT) == S_IFDIR;
+}
+
+directory*
+get_directory_struct(iNode* node)
+{
+	assert(is_iNode_directory(node));
+	return (directory*) get_data_block(node->data_block_ids[0]);
 }
 
 void
@@ -88,6 +104,18 @@ root_init()
 		root->data_block_ids[ii] = -1;
 	}
 
+	file_entry dot;
+	dot.name = ".";
+	dot.iNode_number = 0;
+	file_entry dotdot;
+	dotdot.name = "..";
+	dotdot.iNode_number = 0;
+
+	directory* dir = get_directory_struct(root);
+	dir->number_of_entries = 2;
+	dir->entries = dot;
+	*(&dir->entries + 1) = dotdot;
+
 	bitmap_set((char*) data_bitmap, 0, true);
 	bitmap_set((char*) inode_bitmap, 0, true);
 }
@@ -118,7 +146,7 @@ inode_child(int inode_index, char* inode_name)
 	int data_block = inode->data_block_ids[0];
 	directory* dir = (directory*) get_data_block(data_block);
 	for (int ii = 0; ii < dir->number_of_entries; ++ii) {
-		file_entry* entry = (dir->entries + ii);
+		file_entry* entry = (&dir->entries + ii);
 		if (strcmp(entry->name, inode_name) == 0) {
 			return entry->iNode_number;
 		}
@@ -170,7 +198,6 @@ get_stat(const char* path, struct stat* st)
 	}
 
 	iNode* node = get_iNode(inode_index);
-	printf("inode index: %i\n", inode_index);
 
 	memset(st, 0, sizeof(struct stat));
 	st->st_dev = makedev(0, 0);
@@ -186,10 +213,32 @@ get_stat(const char* path, struct stat* st)
 	st->st_atime = node->last_time_accessed;
 	st->st_mtime = node->last_time_modified;
 	st->st_ctime = node->last_time_status_change;
-
-	printf("inode mode: %lu\n", st->st_ino);
 	
 	return 0;
+}
+
+slist*
+get_filenames_from_dir(const char* path)
+{
+	int node_index = get_inode_from_path(path);
+	if(node_index < 0) {
+		//think on this
+		return (slist*) -ENOENT;
+	}
+
+	iNode* node = get_iNode(node_index);
+	if(!is_iNode_directory(node)) {
+		return (slist*) -ENOTDIR;
+	}
+
+	slist* entry_list = NULL;
+	directory* dir = get_directory_struct(node);
+	for(int ii = 0; ii < dir->number_of_entries; ++ii) {
+		file_entry* entry = (&dir->entries + ii);
+		entry_list = s_cons(entry->name, entry_list);
+	}
+	
+	return entry_list;
 }
 
 const char*
