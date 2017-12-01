@@ -22,11 +22,11 @@ const int DATA_BLOCK_PAGE = 20;
 
 typedef struct file_entry {
 	char* name;
-	int iNode_number;
+	int iNode_num;
 } file_entry;
 
 typedef struct directory {
-	int number_of_entries;
+	int num_entries;
 	file_entry entries;
 } directory;
 
@@ -48,7 +48,7 @@ typedef struct iNode {
 } iNode;
 
 iNode* 
-get_iNode(int index)
+get_inode(int index)
 {
 	iNode* inode_start = pages_get_page(INODE_PAGE);
 	return inode_start + index;
@@ -61,22 +61,22 @@ get_data_block(int index)
 }
 
 bool
-is_iNode_directory(iNode* node)
+is_inode_dir(iNode* node)
 {
 	return (node->mode & S_IFMT) == S_IFDIR;
 }
 
 directory*
-get_directory_struct(iNode* node)
+get_dir(iNode* node)
 {
-	assert(is_iNode_directory(node));
+	assert(is_inode_dir(node));
 	return (directory*) get_data_block(node->data_block_ids[0]);
 }
 
 void
 root_init()
 {
-	iNode* root = get_iNode(0);
+	iNode* root = get_inode(0);
 	if(root->mode != 0) {
 		return;
 	}
@@ -106,13 +106,13 @@ root_init()
 
 	file_entry dot;
 	dot.name = ".";
-	dot.iNode_number = 0;
+	dot.iNode_num = 0;
 	file_entry dotdot;
 	dotdot.name = "..";
-	dotdot.iNode_number = 0;
+	dotdot.iNode_num = 0;
 
-	directory* dir = get_directory_struct(root);
-	dir->number_of_entries = 2;
+	directory* dir = get_dir(root);
+	dir->num_entries = 2;
 	dir->entries = dot;
 	*(&dir->entries + 1) = dotdot;
 
@@ -127,6 +127,7 @@ storage_init(const char* path)
 	root_init();
 }
 
+//	todo: remove
 typedef struct file_data {
     const char* path;
     int         mode;
@@ -142,20 +143,23 @@ static file_data file_table[] = {
 int
 inode_child(int inode_index, char* inode_name)
 {
-	iNode* inode = get_iNode(inode_index);
-	int data_block = inode->data_block_ids[0];
-	directory* dir = (directory*) get_data_block(data_block);
-	for (int ii = 0; ii < dir->number_of_entries; ++ii) {
+	iNode* inode = get_inode(inode_index);
+	if(!is_inode_dir(inode)) {
+		return -1;
+	}
+
+	directory* dir = get_dir(inode);
+	for (int ii = 0; ii < dir->num_entries; ++ii) {
 		file_entry* entry = (&dir->entries + ii);
 		if (strcmp(entry->name, inode_name) == 0) {
-			return entry->iNode_number;
+			return entry->iNode_num;
 		}
 	}
 	return -1;
 }
 
 int
-get_inode_from_path(const char* path)
+inode_index_from_path(const char* path)
 {
 	slist* path_components = s_split(path, '/');
 	int inode_index = 0;
@@ -171,6 +175,7 @@ get_inode_from_path(const char* path)
 }
 
 
+//todo: remove
 static file_data*
 get_file_data(const char* path) {
     for (int ii = 0; 1; ++ii) {
@@ -191,28 +196,28 @@ get_file_data(const char* path) {
 int
 get_stat(const char* path, struct stat* st)
 {
-	int inode_index = get_inode_from_path(path);
+	int inode_index = inode_index_from_path(path);
 	
 	if (inode_index < 0) {
 		return -1;
 	}
 
-	iNode* node = get_iNode(inode_index);
+	iNode* inode = get_inode(inode_index);
 
 	memset(st, 0, sizeof(struct stat));
 	st->st_dev = makedev(0, 0);
 	st->st_ino = inode_index;
-	st->st_mode = node->mode;
-	st->st_nlink = node->num_hard_links;
-	st->st_uid = node->user_id;
-	st->st_gid = node->group_id;
+	st->st_mode = inode->mode;
+	st->st_nlink = inode->num_hard_links;
+	st->st_uid = inode->user_id;
+	st->st_gid = inode->group_id;
 	st->st_rdev = makedev(0, 0);
-	st->st_size = node->size;
+	st->st_size = inode->size;
 	st->st_blksize = 4096;
-	st->st_blocks = (int) ceil(node->size / 512.0);
-	st->st_atime = node->last_time_accessed;
-	st->st_mtime = node->last_time_modified;
-	st->st_ctime = node->last_time_status_change;
+	st->st_blocks = (int) ceil(inode->size / 512.0);
+	st->st_atime = inode->last_time_accessed;
+	st->st_mtime = inode->last_time_modified;
+	st->st_ctime = inode->last_time_status_change;
 	
 	return 0;
 }
@@ -220,20 +225,19 @@ get_stat(const char* path, struct stat* st)
 slist*
 get_filenames_from_dir(const char* path)
 {
-	int node_index = get_inode_from_path(path);
-	if(node_index < 0) {
-		//think on this
+	int inode_index = inode_index_from_path(path);
+	if(inode_index < 0) {
 		return (slist*) -ENOENT;
 	}
 
-	iNode* node = get_iNode(node_index);
-	if(!is_iNode_directory(node)) {
+	iNode* inode = get_inode(inode_index);
+	if(!is_inode_dir(inode)) {
 		return (slist*) -ENOTDIR;
 	}
 
 	slist* entry_list = NULL;
-	directory* dir = get_directory_struct(node);
-	for(int ii = 0; ii < dir->number_of_entries; ++ii) {
+	directory* dir = get_dir(inode);
+	for(int ii = 0; ii < dir->num_entries; ++ii) {
 		file_entry* entry = (&dir->entries + ii);
 		entry_list = s_cons(entry->name, entry_list);
 	}
@@ -241,6 +245,7 @@ get_filenames_from_dir(const char* path)
 	return entry_list;
 }
 
+//todo: remove
 const char*
 get_data(const char* path)
 {
@@ -251,4 +256,86 @@ get_data(const char* path)
 
     return dat->data;
 }
+
+int
+get_next_available_data_block()
+{
+	//todo: implement this
+	//return -1 if there arent any available blocks left
+}
+
+int
+create_dir(const char* path)
+{
+	slist* tokens = s_split(path, '/');
+	if(tokens == NULL) {
+		// find error code
+		return -1;
+	}
+
+	int parent_index = 0;
+	slist* curr = tokens;
+	while(curr->next != NULL) {
+		parent_index = inode_child(parent_index, curr->data);
+		if(parent_index == -1) {
+			// find error code
+			return -1;
+		}
+
+		curr = curr->next;
+	}
+
+	char* new_dir_name = curr->data;
+
+	// make inode, fill out information
+	int new_inode_index = inode_index_from_path(path);
+	iNode* new_inode = get_inode(new_inode_index);
+	new_inode->mode = S_IFDIR | S_IRWXU;
+	new_inode->num_hard_links = 1;
+	new_inode->user_id = getuid();
+	new_inode->group_id = getgid();
+	new_inode->size = sizeof(directory);
+
+	time_t current_time = time(NULL);
+	new_inode->last_time_accessed = current_time;
+	new_inode->last_time_modified = current_time;
+	new_inode->last_time_status_change = current_time;
+
+	int data_block_index = get_next_available_data_block();
+	if(data_block_index < 0) {
+		// find error code
+		return -1;
+	}
+	new_inode->data_block_ids[0] = data_block_index;
+	for(int ii = 1; ii < 10; ii++) {
+		new_inode->data_block_ids[ii] = -1;
+	}
+	
+	directory* dir = get_dir(new_inode);
+	dir->num_entries = 2;
+	//todo: add . and .. directories
+
+	iNode* parent_inode = get_inode(parent_index);
+	if(!is_inode_dir(parent_inode)) {
+		// find error code
+		return -1;
+	}
+
+	directory* parent_dir = get_dir(parent_inode);
+	//todo: make sure this doesn't overflow the data block
+	file_entry* new_entry = (&parent_dir->entries + parent_dir->num_entries);
+	new_entry->name = new_dir_name;
+	new_entry->iNode_num = new_inode_index;
+
+	parent_dir->num_entries = parent_dir->num_entries + 1;
+
+	//confirm we have enough data blocks to add this stuff
+	//make inode, fill out information
+	//get data block for it
+	//add . and .. directories
+	//set up directory structure
+	//add reference to new directory in parent, increment number of entries
+}
+
+
 
