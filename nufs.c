@@ -14,7 +14,7 @@
 #include "storage.h"
 #include "slist.h"
 
-const static int MAX_FILENAME = 200;
+const static int MAX_FILENAME = 256;
 
 // implementation for: man 2 access
 // Checks if a file exists.
