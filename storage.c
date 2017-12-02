@@ -70,6 +70,12 @@ get_data_block(int index)
 }
 
 bool
+is_inode_file(iNode* node)
+{
+	return (node->mode & S_IFMT) == S_IFREG;
+}
+
+bool
 is_inode_dir(iNode* node)
 {
 	return (node->mode & S_IFMT) == S_IFDIR;
@@ -390,17 +396,213 @@ get_filenames_from_dir(const char* path)
 	return entry_list;
 }
 
-//todo: remove
-const char*
-get_data(const char* path)
+void
+free_data_block(int index)
 {
-    file_data* dat = get_file_data(path);
-    if (!dat) {
-        return 0;
-    }
-
-    return dat->data;
+	if (index < 0) {
+		return;
+	}
+	void* block = get_data_block(index);
+	memset(block, 0, PAGE_SIZE);
+	
+	bitmap_set(get_data_bitmap(), index, false);
 }
+
+void
+free_all_blocks(iNode* node)
+{
+	for (int ii = 0; ii < 10; ii++) {
+		free_data_block(node->data_block_ids[ii]);
+		node->data_block_ids[ii] = -1;
+	}
+	
+	// handle indirect block ;P
+}
+
+int
+num_blocks_used(iNode* node)
+{
+	for (int ii = 0; ii < 10; ii++) {
+		if (node->data_block_ids[ii] == -1) {
+			return ii;
+		}
+	}
+	return 10;
+}
+
+int 
+reserve_blocks_for_node(iNode* node, int blocks_needed) 
+{
+	// try to find a contiguous range of blocks
+	int start_of_range = bitmap_find_range(
+	get_data_bitmap(), blocks_needed, NUM_DATA_BLOCKS);
+	// if we can't find a continuous range, reserve one-by-one
+	if (start_of_range < 0) {
+		int blocks_reserved = 0; 
+		while (blocks_reserved < blocks_needed) {
+			int block_id = reserve_data_block();
+			if (block_id < 0) {
+				free_all_blocks(node);
+				return -ENOSPC;
+			}
+			node->data_block_ids[blocks_reserved] = block_id;
+			blocks_reserved++;
+			printf("reserve_blocks_for_node(): reserved block: %i.\n", block_id);
+		}
+		return 0;
+	}
+
+	// if we find a contiguous range, set them all
+	for (int ii = 0; ii < blocks_needed; ii++) {
+		node->data_block_ids[ii] = start_of_range + ii;
+		bitmap_set(get_data_bitmap(), start_of_range + ii, true);
+		printf("reserve_blocks_for_node(): reserved block: %i.\n", start_of_range + ii);
+		// handle indirect block (fuck)
+	}
+	return 0;
+}
+
+int
+remove_blocks_from_node(iNode* node, int num_to_remove)
+{
+	int curr_num_blocks = num_blocks_used(node);
+	int index_to_remove = curr_num_blocks - 1;
+	int num_removed = 0;
+	while (num_removed < num_to_remove) {
+		free_data_block(node->data_block_ids[index_to_remove]);
+		node->data_block_ids[index_to_remove] = -1;
+		index_to_remove--;
+		if (index_to_remove < 0) {
+			return -1;
+		}
+		num_removed++;
+	}
+	return 0;
+}
+
+int
+set_file_to_size(const char* path, off_t size)
+{
+	printf("setting: %s, to: %li.\n", path, size);
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	
+	// clear out the file
+	iNode* node = get_inode(inode_index);
+	
+	if (!is_inode_file(node)) {
+		return -EISDIR;
+	}
+	
+	int curr_num_blocks = num_blocks_used(node);
+	int total_blocks = (int) ceil(size / (PAGE_SIZE * 1.0));
+	int blocks_to_add = total_blocks - curr_num_blocks;
+	
+	node->size = size;
+	if (blocks_to_add == 0) {
+		return 0;
+	} else if (blocks_to_add < 0) {
+		// remove some blocks
+		return remove_blocks_from_node(node, -blocks_to_add);
+	} else {
+		// reserve some blocks
+		return reserve_blocks_for_node(node, blocks_to_add);
+	}
+}
+
+int
+next_read_size(iNode* node, int offset_in_file, int size)
+{
+	size = min(node->size, size);
+	int curr_block_index = offset_in_file / PAGE_SIZE;
+	int offset_in_block = offset_in_file % PAGE_SIZE;
+	
+	int read_size = 0;
+	
+	while (read_size < size && curr_block_index < 10) {
+		read_size += PAGE_SIZE - offset_in_block;
+		offset_in_block = 0;
+		
+		if (curr_block_index == 9) {
+			break;
+		}
+		
+		int curr_block = node->data_block_ids[curr_block_index];
+		int next_block = node->data_block_ids[curr_block_index + 1];
+		
+		if (curr_block + 1 != next_block) {
+			break;
+		}
+		curr_block_index++;		
+	}
+	
+	// handle indirect block
+	
+	return read_size;	
+}
+
+int
+read_file(const char* path, char* buf, size_t size, off_t offset_in_file)
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	iNode* node = get_inode(inode_index);
+	if (!is_inode_file(node)) {
+		return -EISDIR;
+	}
+	size = min(size, node->size);
+	
+	int offset_in_buf = 0;
+	while (offset_in_buf < size) {
+		int read_size = next_read_size(node, offset_in_file, size);
+		
+		int curr_block = offset_in_file / PAGE_SIZE;
+		int offset_in_block = offset_in_file % PAGE_SIZE;
+		void* block = get_data_block(node->data_block_ids[curr_block]);
+	
+		memcpy(buf + offset_in_buf, block + offset_in_block, read_size);
+		offset_in_buf += read_size;
+		offset_in_file += read_size;
+	}
+	
+	return size;
+}
+
+int
+write_file(const char* path, const char* buf, size_t size, off_t offset_in_file)
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	iNode* node = get_inode(inode_index);
+	if (!is_inode_file(node)) {
+		return -EISDIR;
+	}
+	if (node->size < size + offset_in_file) {
+		set_file_to_size(path, size + offset_in_file);
+	}
+	
+	int offset_in_buf = 0;
+	while (offset_in_buf < size) {
+		int read_size = next_read_size(node, offset_in_file, size);
+		
+		int curr_block = offset_in_file / PAGE_SIZE;
+		int offset_in_block = offset_in_file % PAGE_SIZE;
+		void* block = get_data_block(node->data_block_ids[curr_block]);
+	
+		memcpy(block + offset_in_block, buf + offset_in_buf, read_size);
+		offset_in_buf += read_size;
+		offset_in_file += read_size;
+	}
+	
+	return size;
+}
+
 
 int
 create_dir(const char* path)
@@ -476,7 +678,20 @@ create_inode_at_path(const char* path, mode_t mode)
 	return 0;
 }
 
-
+int
+truncate(const char* path, off_t size)
+{
+	printf("truncating: %s, to: %li.\n", path, size);
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	
+	// clear out the file
+	iNode* node = get_inode(inode_index);
+	free_all_blocks(node);
+	set_file_to_size(path, size);
+}
 
 
 

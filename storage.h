@@ -14,5 +14,7 @@ slist* get_filenames_from_dir(const char* path);
 int create_dir(const char* path);
 // should this include rdev from mknod??
 int create_inode_at_path(const char* path, mode_t mode);
-
+int truncate(const char* path, off_t size);
+int read_file(const char* path, char* buf, size_t size, off_t offset_in_file);
+int write_file(const char* path, const char* buf, size_t size, off_t offset_in_file);
 #endif

@@ -49,14 +49,59 @@ bitmap_read(char* bitmap, int index)
 }
 
 static int
-bitmap_first_free(char* bitmap, int size)
+bitmap_next_free(char* bitmap, int from, int size)
 {
-	for (int ii = 0; ii < size; ++ii) {
+	for (int ii = from; ii < size; ++ii) {
 		if (bitmap_read(bitmap, ii) == 0) {
 			return ii;
 		}
 	}
 	return -1;
 }
+
+static int
+bitmap_first_free(char* bitmap, int size)
+{
+	return bitmap_next_free(bitmap, 0, size);
+}
+
+static int
+free_range_size(char* bitmap, int start, int range, int size)
+{
+	if (start + range >= size) {
+		return -1;
+	}
+	
+	for (int ii = start; ii < start + range; ii++) {
+		if (bitmap_read(bitmap, ii)) {
+			return ii - start;
+		}
+	}
+	return range;
+}
+
+static int
+bitmap_find_range(char* bitmap, int range, int size)
+{
+	int curr_range_start = 0;
+	int curr_range_size = 0;
+	while (curr_range_size < range) {
+		curr_range_start = bitmap_next_free(bitmap, 
+						    curr_range_start + curr_range_size,
+						    size);
+		if (curr_range_start < 0) {
+			return -1;
+		}
+		curr_range_size = free_range_size(bitmap, curr_range_start, range, size);
+		if (curr_range_size < 0) {
+			return -1;
+		}
+	}
+	return curr_range_start;
+}
+
+
+
+
 
 #endif
