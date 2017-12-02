@@ -186,16 +186,18 @@ add_entry_to_dir(iNode* inode, const char* entry_name, int inode_num)
 void
 root_init()
 {
+	iNode* root = get_inode(0);
+	// check for a root node that already exists
+	if (root->mode != 0) {
+		return;
+	}
 	void* data_bitmap = pages_get_page(DATA_BITMAP_PAGE);
 	void* inode_bitmap = pages_get_page(INODE_BITMAP_PAGE);
 	memset(data_bitmap, 0, 4096);
 	memset(inode_bitmap, 0, 4096);
 
 	int root_index = reserve_inode();
-	iNode* root = get_inode(root_index);
-	if(root->mode != 0) {
-		return;
-	}
+	root = get_inode(root_index);
 
 	int root_mode = S_IFDIR | S_IRWXU;
 	int* data_block_ids = malloc(10 * sizeof(int));
@@ -210,9 +212,6 @@ root_init()
 
 	add_entry_to_dir(root, ".", data_block_index);
 	add_entry_to_dir(root, "..", data_block_index);
-/*	create_dir("/foo");
-	create_dir("/foo/bar");
-	create_dir("/hi"); */
 }
 
 void
@@ -278,9 +277,8 @@ get_path_components(const char* path)
 }
 
 int
-inode_index_from_path(const char* path)
+inode_index_from_path_components(slist* path_components)
 {
-	slist* path_components = get_path_components(path);
 	if(path_components < 0) {
 		return -ENOENT;
 	}
@@ -294,6 +292,21 @@ inode_index_from_path(const char* path)
 		current = current->next;
 	}
 	return inode_index;
+}
+
+int
+inode_index_from_path(const char* path)
+{
+	slist* path_components = get_path_components(path);
+	return inode_index_from_path_components(path_components);
+}
+
+int
+parent_inode_index_from_path(const char* path)
+{
+	slist* path_components = get_path_components(path);
+	slist* parent_path = s_drop_last(path_components);
+	return inode_index_from_path_components(parent_path);
 }
 
 
@@ -441,6 +454,48 @@ create_dir(const char* path)
 
 	return 0;
 }
+
+int
+create_inode_at_path(const char* path, mode_t mode)
+{
+	int inode_index = reserve_inode();
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	int* data_block_ids = malloc(10 * sizeof(int));
+	for(int ii = 0; ii < 10; ii++) {
+		data_block_ids[ii] = -1;
+	}
+	configure_inode(inode_index, mode, 0, data_block_ids, -1);
+	
+	int parent_inode_index = parent_inode_index_from_path(path);
+	iNode* parent = get_inode(parent_inode_index);
+	
+	const char* file_name = s_get_last(get_path_components(path));
+	add_entry_to_dir(parent, file_name, inode_index);
+	return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

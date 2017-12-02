@@ -55,3 +55,38 @@ s_split(const char* text, char delim)
     return s_cons(part, rest);
 }
 
+slist*
+s_drop_last(slist* list)
+{
+	if (list == NULL || list->next == NULL) {
+		s_free(list);
+		return NULL;
+	}
+	slist* curr = list;
+	while (curr->next != NULL) {
+		curr = curr->next;
+	}
+	s_free(curr);
+	return list;
+}
+
+char*
+s_get_last(slist* list)
+{
+	if (list == NULL) {
+		return NULL;
+	}
+	while (list->next != NULL) {
+		list = list->next;
+	}
+	return list->data;
+}
+
+
+
+
+
+
+
+
+

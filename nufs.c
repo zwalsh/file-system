@@ -77,7 +77,7 @@ int
 nufs_mknod(const char *path, mode_t mode, dev_t rdev)
 {
     printf("mknod(%s, %04o)\n", path, mode);
-    return -1;
+    return create_inode_at_path(path, mode);
 }
 
 // most of the following callbacks implement
@@ -85,8 +85,8 @@ nufs_mknod(const char *path, mode_t mode, dev_t rdev)
 int
 nufs_mkdir(const char *path, mode_t mode)
 {
-    printf("mkdir(%s)\n", path);
-    return -1;
+	printf("mkdir(%s, %i)\n", path, mode);
+	return create_dir(path);
 }
 
 int

@@ -10,6 +10,8 @@ typedef struct slist {
 slist* s_cons(const char* text, slist* rest);
 void   s_free(slist* xs);
 slist* s_split(const char* text, char delim);
+slist* s_drop_last(slist* list);
+char*  s_get_last(slist* list);
 
 #endif
 
