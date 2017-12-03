@@ -17,4 +17,7 @@ int create_inode_at_path(const char* path, mode_t mode);
 int truncate(const char* path, off_t size);
 int read_file(const char* path, char* buf, size_t size, off_t offset_in_file);
 int write_file(const char* path, const char* buf, size_t size, off_t offset_in_file);
+int link_file(const char* path_old, const char* path_new);
+int unlink_file(const char* path);
+int rename_file(const char* from, const char* to);
 #endif

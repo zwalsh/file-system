@@ -21,6 +21,9 @@ const int INODE_BITMAP_PAGE = 1;
 const int INODE_PAGE = 2;
 const int DATA_BLOCK_PAGE = 20;
 const int NUM_DATA_BLOCKS = 236;
+const int NUM_ENTRIES_IN_DIR = 15;
+//use this later
+const int NUM_DATA_BLOCK_IDS = 10;
 
 typedef struct file_entry {
 	char name[256];
@@ -147,7 +150,7 @@ reserve_data_block()
 }
 
 int
-add_entry_to_dir(iNode* inode, const char* entry_name, int inode_num)
+add_entry_to_inode(iNode* inode, const char* entry_name, int inode_num)
 {
 	directory* working_dir;
 	int file_entry_index = -1;
@@ -216,8 +219,8 @@ root_init()
 	root = configure_inode(root_index, root_mode, sizeof(directory), data_block_ids, -1);
 	free(data_block_ids);
 
-	add_entry_to_dir(root, ".", data_block_index);
-	add_entry_to_dir(root, "..", data_block_index);
+	add_entry_to_inode(root, ".", data_block_index);
+	add_entry_to_inode(root, "..", data_block_index);
 }
 
 void
@@ -251,7 +254,7 @@ inode_child(int inode_index, char* inode_name)
 	for(int ii = 0; ii < 10; ii++) {
 		int data_block_id = inode->data_block_ids[ii];
 		directory* curr_dir = (directory*) get_data_block(data_block_id);
-		for(int jj = 0; jj < 15; jj++) {
+		for(int jj = 0; jj < NUM_ENTRIES_IN_DIR; jj++) {
 			char* file_entry_bitmap = (char*) &curr_dir->file_entry_bitmap;
 			if(bitmap_read(file_entry_bitmap, jj)) {
 				file_entry* entry = (&curr_dir->entries + jj);
@@ -650,9 +653,9 @@ create_dir(const char* path)
 	
 	iNode* new_inode = configure_inode(new_inode_index, mode, sizeof(directory), data_block_ids, -1);
 	
-	add_entry_to_dir(new_inode, ".", new_inode_index);
-	add_entry_to_dir(new_inode, "..", parent_index);
-	add_entry_to_dir(parent_inode, new_dir_name, new_inode_index);
+	add_entry_to_inode(new_inode, ".", new_inode_index);
+	add_entry_to_inode(new_inode, "..", parent_index);
+	add_entry_to_inode(parent_inode, new_dir_name, new_inode_index);
 
 	return 0;
 }
@@ -674,7 +677,7 @@ create_inode_at_path(const char* path, mode_t mode)
 	iNode* parent = get_inode(parent_inode_index);
 	
 	const char* file_name = s_get_last(get_path_components(path));
-	add_entry_to_dir(parent, file_name, inode_index);
+	add_entry_to_inode(parent, file_name, inode_index);
 	return 0;
 }
 
@@ -693,7 +696,129 @@ truncate(const char* path, off_t size)
 	set_file_to_size(path, size);
 }
 
+int
+remove_entry_from_dir(directory* dir, const char* entry_name)
+{
+	char* file_entry_bitmap = (char*) &dir->file_entry_bitmap;
+	for(int ii = 0; ii < NUM_ENTRIES_IN_DIR; ii++) {
+		int entry_in_use = bitmap_read(file_entry_bitmap, ii);
+		if(entry_in_use) {
+			file_entry entry = *(&dir->entries + ii);
+			if(strcmp(entry.name, entry_name) == 0) {
+				bitmap_set(file_entry_bitmap, ii, false);
+				memset(&dir->entries + ii, 0, sizeof(file_entry));
+				return 0;
+			}
+		}
+	}
 
+	return -1;
+}
+
+int
+remove_entry_from_inode(iNode* inode, const char* entry_name)
+{
+	for(int ii = 0; ii < 10; ii++) {
+		int curr_data_block = inode->data_block_ids[ii];
+		if(curr_data_block < 0) {
+			continue;
+		}
+
+		directory* working_dir = (directory*) get_data_block(curr_data_block);
+		int rv = remove_entry_from_dir(working_dir, entry_name);
+		if(rv == 0) {
+			return 0;
+		}
+	}
+
+	//handle indirect block :0)
+
+	return -ENOENT;
+}
+
+void
+free_inode(int inode_index)
+{
+	iNode* inode = get_inode(inode_index);
+	free_all_blocks(inode);
+	memset(inode, 0, sizeof(iNode));
+
+	char* inode_bitmap = get_inode_bitmap();
+	bitmap_set(inode_bitmap, inode_index, false);
+}
+
+int
+unlink_file(const char* path)
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+
+	int parent_inode_index = parent_inode_index_from_path(path);
+	if(parent_inode_index < 0) {
+		return -ENOENT;
+	}
+
+	iNode* parent_inode = get_inode(parent_inode_index);
+	slist* path_components = get_path_components(path);
+	const char* entry_name = s_get_last(path_components);
+
+	int rv = remove_entry_from_inode(parent_inode, entry_name);
+	s_free(path_components);
+	if(rv != 0) {
+		return -ENOENT;
+	}
+	
+	iNode* inode = get_inode(inode_index);
+	inode->num_hard_links--;
+	if(inode->num_hard_links > 0) {
+		return 0;
+	}
+
+	free_inode(inode_index);
+	return 0;
+}
+
+int
+link_file(const char* path_old, const char* path_new)
+{
+	int inode_index = inode_index_from_path(path_old);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+
+	iNode* inode = get_inode(inode_index);
+	
+	int parent_inode_index = parent_inode_index_from_path(path_new);
+	if(parent_inode_index < 0) {
+		return -ENOENT;
+	}
+
+	iNode* parent_inode = get_inode(parent_inode_index);
+	slist* path_components = get_path_components(path_new);
+	const char* entry_name = s_get_last(path_components);
+
+	int rv = add_entry_to_inode(parent_inode, entry_name, inode_index);
+	s_free(path_components);
+	if(rv != 0) {
+		return -ENOTDIR;
+	}
+
+	inode->num_hard_links++;
+	return 0;
+}
+
+int
+rename_file(const char* from, const char* to)
+{
+	int rv = link_file(from, to);
+	if(rv != 0) {
+		return rv;
+	}
+
+	return unlink_file(from); 
+}
 
 
 

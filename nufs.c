@@ -92,10 +92,17 @@ nufs_mkdir(const char *path, mode_t mode)
 }
 
 int
+nufs_link(const char *path_old, const char *path_new)
+{
+	printf("\n\nlink(%s, %s)\n", path_old, path_new);
+	return link_file(path_old, path_new);
+}
+
+int
 nufs_unlink(const char *path)
 {
     printf("\n\nunlink(%s)\n", path);
-    return -1;
+    return unlink_file(path);
 }
 
 // must be empty to succeed
@@ -112,7 +119,7 @@ int
 nufs_rename(const char *from, const char *to)
 {
     printf("\n\nrename(%s => %s)\n", from, to);
-    return -1;
+    return rename_file(from, to);
 }
 
 int
@@ -175,6 +182,7 @@ nufs_init_ops(struct fuse_operations* ops)
     ops->readdir  = nufs_readdir;
     ops->mknod    = nufs_mknod;
     ops->mkdir    = nufs_mkdir;
+	ops->link	  = nufs_link;
     ops->unlink   = nufs_unlink;
     ops->rmdir    = nufs_rmdir;
     ops->rename   = nufs_rename;
