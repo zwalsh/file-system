@@ -820,7 +820,42 @@ rename_file(const char* from, const char* to)
 	return unlink_file(from); 
 }
 
+int
+remove_dir(const char* path)
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
 
+	iNode* inode = get_inode(inode_index);
+
+	if(!is_inode_dir(inode)) {
+		return -ENOTDIR;
+	}
+
+	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
+		if(inode->data_block_ids[ii] < 0) {
+			continue;
+		}
+
+		directory* curr_dir = (directory*) get_data_block(inode->data_block_ids[ii]);
+		for(int ii = 0; ii < NUM_ENTRIES_IN_DIR; ii++) {
+			char* dir_bitmap = (char*) &curr_dir->file_entry_bitmap;
+			if(bitmap_read(dir_bitmap, ii)) {
+				file_entry entry = *(&curr_dir->entries + ii);
+				if(!streq(entry.name, ".") && !streq(entry.name, "..")) {
+					return -ENOTEMPTY;
+				}
+			}
+		}
+	}
+	
+	//check if indirect is empty :)
+	
+	int rv = unlink_file(path);
+	return rv;
+}
 
 
 

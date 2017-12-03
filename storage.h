@@ -20,4 +20,6 @@ int write_file(const char* path, const char* buf, size_t size, off_t offset_in_f
 int link_file(const char* path_old, const char* path_new);
 int unlink_file(const char* path);
 int rename_file(const char* from, const char* to);
+int remove_dir(const char* path);
+
 #endif

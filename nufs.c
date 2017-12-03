@@ -54,6 +54,7 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	slist* filenames = get_filenames_from_dir(path);
 	slist* curr_filename = filenames;
 	while(curr_filename != NULL) {
+		printf("curr filename: %s\n", curr_filename->data);
 		char filepath[MAX_FILENAME];
 		strcpy(filepath, path);
 		strcat(filepath, curr_filename->data);
@@ -110,7 +111,7 @@ int
 nufs_rmdir(const char *path)
 {
     printf("\n\nrmdir(%s)\n", path);
-    return -1;
+    return remove_dir(path);
 }
 
 // implements: man 2 rename
@@ -204,4 +205,3 @@ main(int argc, char *argv[])
     nufs_init_ops(&nufs_ops);
     return fuse_main(argc, argv, &nufs_ops, NULL);
 }
-
