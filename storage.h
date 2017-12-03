@@ -21,5 +21,7 @@ int link_file(const char* path_old, const char* path_new);
 int unlink_file(const char* path);
 int rename_file(const char* from, const char* to);
 int remove_dir(const char* path);
+int set_time(const char* path, const struct timespec ts[2]);
+int set_mode(const char* path, mode_t mode);
 
 #endif

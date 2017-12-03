@@ -857,8 +857,32 @@ remove_dir(const char* path)
 	return rv;
 }
 
+int
+set_time(const char* path, const struct timespec ts[2])
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
 
+	iNode* inode = get_inode(inode_index);
+	inode->last_time_accessed = ts[0].tv_sec;
+	inode->last_time_modified = ts[1].tv_sec;
+	return 0;
+}
 
+int
+set_mode(const char* path, mode_t mode)
+{
+	int inode_index = inode_index_from_path(path);
+	if (inode_index < 0) {
+		return -ENOENT;
+	}
+	
+	iNode* inode = get_inode(inode_index);
+	inode->mode = mode;
+	return 0;
+}
 
 
 

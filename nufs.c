@@ -22,6 +22,15 @@ int
 nufs_access(const char *path, int mask)
 {
     printf("\n\naccess(%s, %04o)\n", path, mask);
+    struct stat st;
+    int rv = get_stat(path, &st);
+    if(rv < 0) {
+    	return -ENOENT;
+    }
+    
+    int mode = st.st_mode;
+    
+    
     return 0;
 }
 
@@ -127,7 +136,7 @@ int
 nufs_chmod(const char *path, mode_t mode)
 {
     printf("\n\nchmod(%s, %04o)\n", path, mode);
-    return -1;
+    return set_mode(path, mode);
 }
 
 int
@@ -167,8 +176,7 @@ nufs_write(const char *path, const char *buf, size_t size, off_t offset, struct 
 int
 nufs_utimens(const char* path, const struct timespec ts[2])
 {
-    //int rv = storage_set_time(path, ts);
-    int rv = 1;
+    int rv = set_time(path, ts);
     printf("\n\nutimens(%s, [%ld, %ld; %ld %ld]) -> %d\n",
            path, ts[0].tv_sec, ts[0].tv_nsec, ts[1].tv_sec, ts[1].tv_nsec, rv);
 	return rv;
