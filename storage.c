@@ -112,6 +112,37 @@ configure_inode(int inode_id, int mode, int size, int* data_block_ids,
 	inode->indirect_data_block_id = indirect_data_block_id;
 }
 
+ilist*
+get_data_block_ids(iNode* node)
+{
+	ilist* list = NULL;
+	
+	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
+		if(node->data_block_ids[ii] >=0) {
+			printf("Adding %i to data blocks.\n", node->data_block_ids[ii]);
+			list = i_cons(node->data_block_ids[ii], list);
+		}
+	}
+	
+	printf("Done adding from data_block_ids.\n");
+	if(node->indirect_data_block_id != -1) {
+		printf("Adding from indirect now: %i.\n", node->indirect_data_block_id);
+		int* extra_data_blocks = (int*) get_data_block(node->indirect_data_block_id);
+		int index_in_extra = 0;
+		while((index_in_extra + 1) * sizeof(int) < PAGE_SIZE) {
+			int curr_block_id = *(extra_data_blocks + index_in_extra);
+			
+			if (curr_block_id == 0) {
+				break;
+			}
+			printf("Adding %i to data blocks.\n", curr_block_id);
+			list = i_cons(curr_block_id, list);
+			index_in_extra++;
+		}
+	}
+	return list;
+}
+
 char*
 get_inode_bitmap()
 {
@@ -382,8 +413,13 @@ get_filenames_from_dir(const char* path)
 	}
 
 	slist* entry_list = NULL;
-	for(int ii = 0; ii < 10; ii++) {
-		int data_block_id = inode->data_block_ids[ii];
+	
+	printf("Calling gdbi from get_filenames_from_dir().\n");
+	ilist* data_blocks = get_data_block_ids(inode);
+	ilist* curr_block = data_blocks;
+	
+	while(curr_block != NULL) {
+		int data_block_id = curr_block->data;
 		directory* curr_dir = (directory*) get_data_block(data_block_id);
 		for(int jj = 0; jj < 15; jj++) {
 			char* file_entry_bitmap = (char*) &curr_dir->file_entry_bitmap;
@@ -392,9 +428,10 @@ get_filenames_from_dir(const char* path)
 				entry_list = s_cons(entry->name, entry_list);
 			}
 		}
+		curr_block = curr_block->next;
 	}
 
-	//check indirect blocks;
+	i_free(data_blocks);
 
 	return entry_list;
 }
@@ -414,23 +451,37 @@ free_data_block(int index)
 void
 free_all_blocks(iNode* node)
 {
-	for (int ii = 0; ii < 10; ii++) {
-		free_data_block(node->data_block_ids[ii]);
+	printf("Calling gdbi from free_all_blocks().\n");
+	ilist* data_blocks = get_data_block_ids(node);
+	ilist* curr_block = data_blocks;
+	while(curr_block != NULL) {
+		int block_id = curr_block->data;
+		free_data_block(block_id);
+		curr_block = curr_block->next;
+	}	
+	for (int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
 		node->data_block_ids[ii] = -1;
 	}
-	
-	// handle indirect block ;P
+	if (node->indirect_data_block_id != -1) {
+		free_data_block(node->indirect_data_block_id);
+		node->indirect_data_block_id = -1;
+	}
+	i_free(data_blocks);
 }
 
 int
 num_blocks_used(iNode* node)
 {
-	for (int ii = 0; ii < 10; ii++) {
-		if (node->data_block_ids[ii] == -1) {
-			return ii;
-		}
+	int count = 0;
+	printf("Calling gdbi from num_blocks_used().\n");
+	ilist* data_blocks = get_data_block_ids(node);
+	ilist* curr_block = data_blocks;
+	while(curr_block != NULL) {
+		count++;
+		curr_block = curr_block->next;
 	}
-	return 10;
+	i_free(data_blocks);
+	return count;
 }
 
 int 

@@ -4,6 +4,30 @@
 
 #include "slist.h"
 
+ilist*
+i_cons(int i, ilist* rest)
+{
+	ilist* xs = malloc(sizeof(ilist));
+	xs->data = i;
+	xs->refs = 1;
+	xs->next = rest;
+	return xs;
+}
+
+void
+i_free(ilist* xs)
+{
+	if(xs == 0) {
+		return;
+	}
+	xs->refs -= 1;
+	
+	if(xs->refs == 0) {
+		i_free(xs->next);
+		free(xs);
+	}
+}
+
 slist*
 s_cons(const char* text, slist* rest)
 {
