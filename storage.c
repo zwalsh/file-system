@@ -22,7 +22,6 @@ const int INODE_PAGE = 2;
 const int DATA_BLOCK_PAGE = 20;
 const int NUM_DATA_BLOCKS = 236;
 const int NUM_ENTRIES_IN_DIR = 15;
-//use this later
 const int NUM_DATA_BLOCK_IDS = 10;
 
 typedef struct file_entry {
@@ -48,7 +47,6 @@ typedef struct iNode {
 	time_t last_time_accessed;
 	time_t last_time_modified;
 	time_t last_time_status_change;
-	// array of blocks that store this thing
 	int data_block_ids[10];
 	int indirect_data_block_id;
 } iNode;
@@ -108,7 +106,7 @@ configure_inode(int inode_id, int mode, int size, int* data_block_ids,
 	inode->last_time_modified = current_time;
 	inode->last_time_status_change = current_time;
 
-	memcpy(inode->data_block_ids, data_block_ids, 10 * sizeof(int));
+	memcpy(inode->data_block_ids, data_block_ids, NUM_DATA_BLOCK_IDS * sizeof(int));
 	inode->indirect_data_block_id = indirect_data_block_id;
 }
 
@@ -118,15 +116,12 @@ get_data_block_ids(iNode* node)
 	ilist* list = NULL;
 	
 	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
-		if(node->data_block_ids[ii] >=0) {
-			printf("Adding %i to data blocks.\n", node->data_block_ids[ii]);
+		if(node->data_block_ids[ii] >= 0) {
 			list = i_cons(node->data_block_ids[ii], list);
 		}
 	}
 	
-	printf("Done adding from data_block_ids.\n");
 	if(node->indirect_data_block_id != -1) {
-		printf("Adding from indirect now: %i.\n", node->indirect_data_block_id);
 		int* extra_data_blocks = (int*) get_data_block(node->indirect_data_block_id);
 		int index_in_extra = 0;
 		while((index_in_extra + 1) * sizeof(int) < PAGE_SIZE) {
@@ -135,7 +130,6 @@ get_data_block_ids(iNode* node)
 			if (curr_block_id == 0) {
 				break;
 			}
-			printf("Adding %i to data blocks.\n", curr_block_id);
 			list = i_cons(curr_block_id, list);
 			index_in_extra++;
 		}
@@ -164,7 +158,6 @@ reserve_inode()
 		return -ENOMEM;
 	}
 	bitmap_set(inode_bitmap, new_inode_index, true);
-	printf("reserved inode %i \n", new_inode_index);
 	return new_inode_index;
 }
 
@@ -181,35 +174,80 @@ reserve_data_block()
 }
 
 int
+num_blocks_used(iNode* node)
+{
+	int count = 0;
+	ilist* data_blocks = get_data_block_ids(node);
+	ilist* curr_block = data_blocks;
+	while(curr_block != NULL) {
+		count++;
+		curr_block = curr_block->next;
+	}
+	i_free(data_blocks);
+	return count;
+}
+
+int
+add_block_to_node(iNode* node, int block_id)
+{
+	int curr_num_blocks = num_blocks_used(node);
+	
+	if (curr_num_blocks < NUM_DATA_BLOCK_IDS) {
+		// place it in the array of block ids.
+		node->data_block_ids[curr_num_blocks] = block_id;
+	} else {
+		// place it in the indirect block.
+		int pos_in_indirect = curr_num_blocks - NUM_DATA_BLOCK_IDS;
+		if (pos_in_indirect == 0) {
+			// get an indirect block
+			int indir_block = reserve_data_block();
+			if (indir_block < 0) {
+				return -ENOSPC;
+			}
+			node->indirect_data_block_id = indir_block;
+		}
+		if (pos_in_indirect >= PAGE_SIZE / sizeof(int)) {
+			return -ENOSPC;
+		}
+		int* indirect = (int*) get_data_block(node->indirect_data_block_id);
+		*(indirect + pos_in_indirect) = block_id;
+	}
+	
+	return 0;
+}
+
+int
 add_entry_to_inode(iNode* inode, const char* entry_name, int inode_num)
 {
 	directory* working_dir;
 	int file_entry_index = -1;
-
-	for(int ii = 0; ii < 10; ii++) {
-		int curr_data_block = inode->data_block_ids[ii];
-		if(curr_data_block == -1) {
-			int new_block_id = reserve_data_block();
-			inode->data_block_ids[ii] = new_block_id;
-			working_dir = (directory*) get_data_block(new_block_id);
-			file_entry_index = 0;
+	
+	
+	ilist* data_blocks = get_data_block_ids(inode);
+	ilist* curr_block = data_blocks;
+	while(curr_block != NULL) {
+		int block_id = curr_block->data;
+		
+		working_dir = (directory*) get_data_block(block_id);
+		char* file_entry_bitmap = (char*) &working_dir->file_entry_bitmap;
+		file_entry_index = bitmap_first_free(file_entry_bitmap, NUM_ENTRIES_IN_DIR);
+		if (file_entry_index >= 0) {
 			break;
-		} else {
-			working_dir = (directory*) get_data_block(curr_data_block);
-			char* file_entry_bitmap = (char*) &working_dir->file_entry_bitmap;
-			file_entry_index = bitmap_first_free(file_entry_bitmap, 15);
-			if(file_entry_index != -1) {
-				break;
-			}
 		}
+		curr_block = curr_block->next;
 	}
-
-	printf("placing: %s ", entry_name);
-	printf("ref to: %i", inode_num);
-	printf("file entry index: %i\n", file_entry_index);
-
+	
 	if(file_entry_index == -1) {
-		//use indirect block
+		int new_block = reserve_data_block();
+		if(new_block < 0) {
+			return -ENOSPC;
+		}
+		int rv = add_block_to_node(inode, new_block);
+		if(rv < 0) {
+			return -ENOSPC;
+		}
+		working_dir = (directory*) get_data_block(new_block);
+		file_entry_index = 0;
 	}
 
 	file_entry entry;
@@ -240,10 +278,10 @@ root_init()
 	root = get_inode(root_index);
 
 	int root_mode = S_IFDIR | S_IRWXU;
-	int* data_block_ids = malloc(10 * sizeof(int));
+	int* data_block_ids = malloc(NUM_DATA_BLOCK_IDS * sizeof(int));
 	int data_block_index = reserve_data_block();
 	data_block_ids[0] = data_block_index;
-	for(int ii = 1; ii < 10; ii++) {
+	for(int ii = 1; ii < NUM_DATA_BLOCK_IDS; ii++) {
 		data_block_ids[ii] = -1;
 	}
 
@@ -261,19 +299,6 @@ storage_init(const char* path)
 	root_init();
 }
 
-//	todo: remove
-typedef struct file_data {
-    const char* path;
-    int         mode;
-    const char* data;
-} file_data;
-
-static file_data file_table[] = {
-    {"/", 040755, 0},
-    {"/hello.txt", 0100644, "hello\n"},
-    {0, 0, 0},
-};
-
 int
 inode_child(int inode_index, char* inode_name)
 {
@@ -282,7 +307,7 @@ inode_child(int inode_index, char* inode_name)
 		return -ENOTDIR;
 	}
 
-	for(int ii = 0; ii < 10; ii++) {
+	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
 		int data_block_id = inode->data_block_ids[ii];
 		directory* curr_dir = (directory*) get_data_block(data_block_id);
 		for(int jj = 0; jj < NUM_ENTRIES_IN_DIR; jj++) {
@@ -349,25 +374,6 @@ parent_inode_index_from_path(const char* path)
 	return inode_index_from_path_components(parent_path);
 }
 
-
-//todo: remove
-static file_data*
-get_file_data(const char* path) {
-    for (int ii = 0; 1; ++ii) {
-        file_data row = file_table[ii];
-
-        if (file_table[ii].path == 0) {
-            break;
-        }
-
-        if (streq(path, file_table[ii].path)) {
-            return &(file_table[ii]);
-        }
-    }
-
-    return 0;
-}
-
 int
 get_stat(const char* path, struct stat* st)
 {
@@ -400,9 +406,7 @@ get_stat(const char* path, struct stat* st)
 slist*
 get_filenames_from_dir(const char* path)
 {
-	printf("getting filenames: %s", path);
 	int inode_index = inode_index_from_path(path);
-	printf(" inode index: %i\n", inode_index);
 	if(inode_index < 0) {
 		return (slist*) -ENOENT;
 	}
@@ -414,14 +418,13 @@ get_filenames_from_dir(const char* path)
 
 	slist* entry_list = NULL;
 	
-	printf("Calling gdbi from get_filenames_from_dir().\n");
 	ilist* data_blocks = get_data_block_ids(inode);
 	ilist* curr_block = data_blocks;
 	
 	while(curr_block != NULL) {
 		int data_block_id = curr_block->data;
 		directory* curr_dir = (directory*) get_data_block(data_block_id);
-		for(int jj = 0; jj < 15; jj++) {
+		for(int jj = 0; jj < NUM_ENTRIES_IN_DIR; jj++) {
 			char* file_entry_bitmap = (char*) &curr_dir->file_entry_bitmap;
 			if(bitmap_read(file_entry_bitmap, jj)) {
 				file_entry* entry = (&curr_dir->entries + jj);
@@ -432,7 +435,6 @@ get_filenames_from_dir(const char* path)
 	}
 
 	i_free(data_blocks);
-
 	return entry_list;
 }
 
@@ -451,7 +453,6 @@ free_data_block(int index)
 void
 free_all_blocks(iNode* node)
 {
-	printf("Calling gdbi from free_all_blocks().\n");
 	ilist* data_blocks = get_data_block_ids(node);
 	ilist* curr_block = data_blocks;
 	while(curr_block != NULL) {
@@ -469,21 +470,6 @@ free_all_blocks(iNode* node)
 	i_free(data_blocks);
 }
 
-int
-num_blocks_used(iNode* node)
-{
-	int count = 0;
-	printf("Calling gdbi from num_blocks_used().\n");
-	ilist* data_blocks = get_data_block_ids(node);
-	ilist* curr_block = data_blocks;
-	while(curr_block != NULL) {
-		count++;
-		curr_block = curr_block->next;
-	}
-	i_free(data_blocks);
-	return count;
-}
-
 int 
 reserve_blocks_for_node(iNode* node, int blocks_needed) 
 {
@@ -492,26 +478,23 @@ reserve_blocks_for_node(iNode* node, int blocks_needed)
 	get_data_bitmap(), blocks_needed, NUM_DATA_BLOCKS);
 	// if we can't find a continuous range, reserve one-by-one
 	if (start_of_range < 0) {
-		int blocks_reserved = 0; 
+		int blocks_reserved = 0;
 		while (blocks_reserved < blocks_needed) {
 			int block_id = reserve_data_block();
 			if (block_id < 0) {
 				free_all_blocks(node);
 				return -ENOSPC;
 			}
-			node->data_block_ids[blocks_reserved] = block_id;
+			add_block_to_node(node, block_id);
 			blocks_reserved++;
-			printf("reserve_blocks_for_node(): reserved block: %i.\n", block_id);
 		}
 		return 0;
 	}
 
 	// if we find a contiguous range, set them all
 	for (int ii = 0; ii < blocks_needed; ii++) {
-		node->data_block_ids[ii] = start_of_range + ii;
+		add_block_to_node(node, start_of_range + ii);
 		bitmap_set(get_data_bitmap(), start_of_range + ii, true);
-		printf("reserve_blocks_for_node(): reserved block: %i.\n", start_of_range + ii);
-		// handle indirect block (fuck)
 	}
 	return 0;
 }
@@ -537,7 +520,6 @@ remove_blocks_from_node(iNode* node, int num_to_remove)
 int
 set_file_to_size(const char* path, off_t size)
 {
-	printf("setting: %s, to: %li.\n", path, size);
 	int inode_index = inode_index_from_path(path);
 	if (inode_index < 0) {
 		return -ENOENT;
@@ -570,30 +552,37 @@ int
 next_read_size(iNode* node, int offset_in_file, int size)
 {
 	size = min(node->size, size);
-	int curr_block_index = offset_in_file / PAGE_SIZE;
+	int starting_block_index = offset_in_file / PAGE_SIZE;
 	int offset_in_block = offset_in_file % PAGE_SIZE;
 	
 	int read_size = 0;
 	
-	while (read_size < size && curr_block_index < 10) {
-		read_size += PAGE_SIZE - offset_in_block;
-		offset_in_block = 0;
-		
-		if (curr_block_index == 9) {
-			break;
-		}
-		
-		int curr_block = node->data_block_ids[curr_block_index];
-		int next_block = node->data_block_ids[curr_block_index + 1];
-		
-		if (curr_block + 1 != next_block) {
-			break;
-		}
-		curr_block_index++;		
+	ilist* data_blocks = get_data_block_ids(node);
+	ilist* curr_block = data_blocks;
+	
+	while(starting_block_index > 0) {
+		curr_block = curr_block->next;
+		starting_block_index--;
 	}
 	
-	// handle indirect block
+	while (read_size < size && curr_block != NULL) {
+		read_size += PAGE_SIZE - offset_in_block;
+		offset_in_block = 0;
 	
+		if(curr_block->next == NULL) {
+			break;
+		}
+			
+		int curr_block_id = curr_block->data;
+		int next_block_id = curr_block->next->data;
+		
+		if (curr_block_id + 1 != next_block_id) {
+			break;
+		}
+		curr_block = curr_block->next;		
+	}
+	
+	i_free(data_blocks);	
 	return read_size;	
 }
 
@@ -666,7 +655,6 @@ create_dir(const char* path)
 	if(tokens < 0) {
 		return -ENOENT;
 	}
-	printf("token: %s\n", tokens->data);
 	if(tokens == NULL) {
 		return -ENOENT;
 	}
@@ -696,9 +684,9 @@ create_dir(const char* path)
 	}
 
 	int mode = S_IFDIR | S_IRWXU;
-	int* data_block_ids = malloc(10 * sizeof(int));
+	int* data_block_ids = malloc(NUM_DATA_BLOCK_IDS * sizeof(int));
 	data_block_ids[0] = new_data_block_index;
-	for(int ii = 1; ii < 10; ii++) {
+	for(int ii = 1; ii < NUM_DATA_BLOCK_IDS; ii++) {
 		data_block_ids[ii] = -1;
 	}
 	
@@ -718,8 +706,8 @@ create_inode_at_path(const char* path, mode_t mode)
 	if (inode_index < 0) {
 		return -ENOENT;
 	}
-	int* data_block_ids = malloc(10 * sizeof(int));
-	for(int ii = 0; ii < 10; ii++) {
+	int* data_block_ids = malloc(NUM_DATA_BLOCK_IDS * sizeof(int));
+	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
 		data_block_ids[ii] = -1;
 	}
 	configure_inode(inode_index, mode, 0, data_block_ids, -1);
@@ -735,7 +723,6 @@ create_inode_at_path(const char* path, mode_t mode)
 int
 truncate(const char* path, off_t size)
 {
-	printf("truncating: %s, to: %li.\n", path, size);
 	int inode_index = inode_index_from_path(path);
 	if (inode_index < 0) {
 		return -ENOENT;
@@ -769,8 +756,11 @@ remove_entry_from_dir(directory* dir, const char* entry_name)
 int
 remove_entry_from_inode(iNode* inode, const char* entry_name)
 {
-	for(int ii = 0; ii < 10; ii++) {
-		int curr_data_block = inode->data_block_ids[ii];
+	ilist* data_blocks = get_data_block_ids(inode);
+	ilist* curr_block = data_blocks;	
+		
+	while(curr_block != NULL) {
+		int curr_data_block = curr_block->data;
 		if(curr_data_block < 0) {
 			continue;
 		}
@@ -778,12 +768,13 @@ remove_entry_from_inode(iNode* inode, const char* entry_name)
 		directory* working_dir = (directory*) get_data_block(curr_data_block);
 		int rv = remove_entry_from_dir(working_dir, entry_name);
 		if(rv == 0) {
+			i_free(data_blocks);
 			return 0;
 		}
+		curr_block = curr_block->next;
 	}
 
-	//handle indirect block :0)
-
+	i_free(data_blocks);
 	return -ENOENT;
 }
 
@@ -884,26 +875,27 @@ remove_dir(const char* path)
 	if(!is_inode_dir(inode)) {
 		return -ENOTDIR;
 	}
+	
+	ilist* data_blocks = get_data_block_ids(inode);
+	ilist* curr_block = data_blocks;
 
-	for(int ii = 0; ii < NUM_DATA_BLOCK_IDS; ii++) {
-		if(inode->data_block_ids[ii] < 0) {
-			continue;
-		}
-
-		directory* curr_dir = (directory*) get_data_block(inode->data_block_ids[ii]);
+	while(curr_block != NULL) {
+		int block_id = curr_block->data;
+		directory* curr_dir = (directory*) get_data_block(block_id);
 		for(int ii = 0; ii < NUM_ENTRIES_IN_DIR; ii++) {
 			char* dir_bitmap = (char*) &curr_dir->file_entry_bitmap;
 			if(bitmap_read(dir_bitmap, ii)) {
 				file_entry entry = *(&curr_dir->entries + ii);
 				if(!streq(entry.name, ".") && !streq(entry.name, "..")) {
+					i_free(data_blocks);
 					return -ENOTEMPTY;
 				}
 			}
 		}
+		curr_block->next;
 	}
 	
-	//check if indirect is empty :)
-	
+	i_free(data_blocks);
 	int rv = unlink_file(path);
 	return rv;
 }
@@ -934,18 +926,4 @@ set_mode(const char* path, mode_t mode)
 	inode->mode = mode;
 	return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

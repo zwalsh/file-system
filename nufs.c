@@ -69,8 +69,6 @@ nufs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		strcat(filepath, curr_filename->data);
 
 		get_stat(filepath, &st);
-		//should curr_filename->data be null terminated?
-		// wtf do we pass in as an offset
 		int rv = filler(buf, curr_filename->data, &st, 0);
 		if(rv != 0) {
 			break;
@@ -211,5 +209,6 @@ main(int argc, char *argv[])
     assert(argc > 2 && argc < 6);
     storage_init(argv[--argc]);
     nufs_init_ops(&nufs_ops);
+    
     return fuse_main(argc, argv, &nufs_ops, NULL);
 }
